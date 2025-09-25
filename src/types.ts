@@ -675,7 +675,27 @@ export function messageToTypeName(
   if (!typeOptions.keepValueType && options.useMongoObjectId && protoType.endsWith(".ObjectId")) {
     return code`mongodb.ObjectId`;
   }
-  const [module, type] = toModuleAndType(typeMap, protoType);
+  const [module, type, descriptor] = toModuleAndType(typeMap, protoType);
+
+  // If nestedEnumsAsNamespaces is enabled and this is a nested enum, convert to namespace format
+  if (options.nestedEnumsAsNamespaces && descriptor && "value" in descriptor && type.includes("_")) {
+    const lastUnderscore = type.lastIndexOf("_");
+    const namespaceName = type.substring(0, lastUnderscore);
+    const enumName = type.substring(lastUnderscore + 1);
+    return code`${impProto(options, module, namespaceName)}.${enumName}`;
+  }
+
+  // If nestedEnumsAsNamespaces is enabled and this is a message with nested enums,
+  // reference the interface inside the namespace
+  if (
+    options.nestedEnumsAsNamespaces &&
+    descriptor &&
+    !("value" in descriptor) &&
+    (descriptor as DescriptorProto).enumType?.length > 0
+  ) {
+    return code`${impProto(options, module, type)}.${type}`;
+  }
+
   return code`${impProto(options, module, type)}`;
 }
 

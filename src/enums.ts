@@ -18,12 +18,43 @@ export function generateEnum(
   const chunks: Code[] = [];
   let unrecognizedEnum: UnrecognizedEnum = { present: false };
 
+  // Check if this is a nested enum and if we should use namespaces
+  const isNestedEnum = fullName.includes("_");
+  const useNamespace = options.nestedEnumsAsNamespaces && isNestedEnum;
+
+  let actualEnumName = fullName;
+  let namespaceName: string | undefined;
+
+  if (useNamespace) {
+    const lastUnderscore = fullName.lastIndexOf("_");
+    namespaceName = fullName.substring(0, lastUnderscore);
+    actualEnumName = fullName.substring(lastUnderscore + 1);
+  }
+
   maybeAddComment(options, sourceInfo, chunks, enumDesc.options?.deprecated);
 
+  if (useNamespace) {
+    // Create namespace and enum inside it
+    // Use regular namespace for enumsAsLiterals because declare namespace can't have const initializers
+    if (options.enumsAsLiterals) {
+      chunks.push(code`export namespace ${def(namespaceName!)} {`);
+    } else {
+      chunks.push(code`export declare namespace ${def(namespaceName!)} {`);
+    }
+  }
+
   if (options.enumsAsLiterals) {
-    chunks.push(code`export const ${def(fullName)} = {`);
+    if (useNamespace) {
+      chunks.push(code`export const ${def(actualEnumName)} = {`);
+    } else {
+      chunks.push(code`export const ${def(fullName)} = {`);
+    }
   } else {
-    chunks.push(code`export ${options.constEnums ? "const " : ""}enum ${def(fullName)} {`);
+    if (useNamespace) {
+      chunks.push(code`export ${options.constEnums ? "const " : ""}enum ${def(actualEnumName)} {`);
+    } else {
+      chunks.push(code`export ${options.constEnums ? "const " : ""}enum ${def(fullName)} {`);
+    }
   }
 
   const delimiter = options.enumsAsLiterals ? ":" : "=";
@@ -51,23 +82,48 @@ export function generateEnum(
   if (options.enumsAsLiterals) {
     chunks.push(code`} as const`);
     chunks.push(code`\n`);
-    chunks.push(code`export type ${def(fullName)} = typeof ${def(fullName)}[keyof typeof ${def(fullName)}]`);
+    if (useNamespace) {
+      chunks.push(
+        code`export type ${def(actualEnumName)} = typeof ${def(actualEnumName)}[keyof typeof ${def(actualEnumName)}]`,
+      );
+    } else {
+      chunks.push(code`export type ${def(fullName)} = typeof ${def(fullName)}[keyof typeof ${def(fullName)}]`);
+    }
     chunks.push(code`\n`);
-    chunks.push(code`export namespace ${def(fullName)} {`);
+    if (useNamespace) {
+      chunks.push(code`export namespace ${def(actualEnumName)} {`);
+    } else {
+      chunks.push(code`export namespace ${def(fullName)} {`);
+    }
 
     enumDesc.value.forEach((valueDesc) => {
       const memberName = getMemberName(ctx, enumDesc, valueDesc);
-      chunks.push(code`export type ${memberName} = typeof ${def(fullName)}.${memberName};`);
+      if (useNamespace) {
+        chunks.push(code`export type ${memberName} = typeof ${def(actualEnumName)}.${memberName};`);
+      } else {
+        chunks.push(code`export type ${memberName} = typeof ${def(fullName)}.${memberName};`);
+      }
     });
 
     if (options.unrecognizedEnum && !unrecognizedEnum.present) {
-      chunks.push(
-        code`export type ${options.unrecognizedEnumName} = typeof ${def(fullName)}.${options.unrecognizedEnumName};`,
-      );
+      if (useNamespace) {
+        chunks.push(
+          code`export type ${options.unrecognizedEnumName} = typeof ${def(actualEnumName)}.${options.unrecognizedEnumName};`,
+        );
+      } else {
+        chunks.push(
+          code`export type ${options.unrecognizedEnumName} = typeof ${def(fullName)}.${options.unrecognizedEnumName};`,
+        );
+      }
     }
 
     chunks.push(code`}`);
   } else {
+    chunks.push(code`}`);
+  }
+
+  // Close the namespace if we opened one
+  if (useNamespace) {
     chunks.push(code`}`);
   }
 
@@ -77,15 +133,42 @@ export function generateEnum(
     (options.stringEnums && options.outputEncodeMethods)
   ) {
     chunks.push(code`\n`);
-    chunks.push(generateEnumFromJson(ctx, fullName, enumDesc, unrecognizedEnum));
+    chunks.push(
+      generateEnumFromJson(
+        ctx,
+        fullName,
+        enumDesc,
+        unrecognizedEnum,
+        useNamespace ? namespaceName : undefined,
+        useNamespace ? actualEnumName : undefined,
+      ),
+    );
   }
   if (options.outputJsonMethods === true || options.outputJsonMethods === "to-only") {
     chunks.push(code`\n`);
-    chunks.push(generateEnumToJson(ctx, fullName, enumDesc, unrecognizedEnum));
+    chunks.push(
+      generateEnumToJson(
+        ctx,
+        fullName,
+        enumDesc,
+        unrecognizedEnum,
+        useNamespace ? namespaceName : undefined,
+        useNamespace ? actualEnumName : undefined,
+      ),
+    );
   }
   if (options.stringEnums && options.outputEncodeMethods) {
     chunks.push(code`\n`);
-    chunks.push(generateEnumToNumber(ctx, fullName, enumDesc, unrecognizedEnum));
+    chunks.push(
+      generateEnumToNumber(
+        ctx,
+        fullName,
+        enumDesc,
+        unrecognizedEnum,
+        useNamespace ? namespaceName : undefined,
+        useNamespace ? actualEnumName : undefined,
+      ),
+    );
   }
 
   return joinCode(chunks, { on: "\n" });
@@ -97,12 +180,15 @@ export function generateEnumFromJson(
   fullName: string,
   enumDesc: EnumDescriptorProto,
   unrecognizedEnum: UnrecognizedEnum,
+  namespaceName?: string,
+  actualEnumName?: string,
 ): Code {
   const { options, utils } = ctx;
   const chunks: Code[] = [];
 
+  const enumReference = namespaceName && actualEnumName ? `${namespaceName}.${actualEnumName}` : fullName;
   const functionName = uncapitalize(fullName) + "FromJSON";
-  chunks.push(code`export function ${def(functionName)}(object: any): ${fullName} {`);
+  chunks.push(code`export function ${def(functionName)}(object: any): ${enumReference} {`);
   chunks.push(code`switch (object) {`);
 
   for (const valueDesc of enumDesc.value) {
@@ -111,7 +197,7 @@ export function generateEnumFromJson(
     chunks.push(code`
       case ${valueDesc.number}:
       case "${valueName}":
-        return ${fullName}.${memberName};
+        return ${enumReference}.${memberName};
     `);
   }
 
@@ -121,12 +207,12 @@ export function generateEnumFromJson(
         case ${options.unrecognizedEnumValue}:
         case "${options.unrecognizedEnumName}":
         default:
-          return ${fullName}.${options.unrecognizedEnumName};
+          return ${enumReference}.${options.unrecognizedEnumName};
       `);
     } else {
       chunks.push(code`
         default:
-          return ${fullName}.${unrecognizedEnum.name};
+          return ${enumReference}.${unrecognizedEnum.name};
       `);
     }
   } else {
@@ -148,14 +234,17 @@ export function generateEnumToJson(
   fullName: string,
   enumDesc: EnumDescriptorProto,
   unrecognizedEnum: UnrecognizedEnum,
+  namespaceName?: string,
+  actualEnumName?: string,
 ): Code {
   const { options, utils } = ctx;
 
   const chunks: Code[] = [];
 
+  const enumReference = namespaceName && actualEnumName ? `${namespaceName}.${actualEnumName}` : fullName;
   const functionName = uncapitalize(fullName) + "ToJSON";
   chunks.push(
-    code`export function ${def(functionName)}(object: ${fullName}): ${
+    code`export function ${def(functionName)}(object: ${enumReference}): ${
       ctx.options.useNumericEnumForJson ? "number" : "string"
     } {`,
   );
@@ -164,18 +253,18 @@ export function generateEnumToJson(
   for (const valueDesc of enumDesc.value) {
     if (ctx.options.useNumericEnumForJson) {
       const memberName = getMemberName(ctx, enumDesc, valueDesc);
-      chunks.push(code`case ${fullName}.${memberName}: return ${valueDesc.number};`);
+      chunks.push(code`case ${enumReference}.${memberName}: return ${valueDesc.number};`);
     } else {
       const memberName = getMemberName(ctx, enumDesc, valueDesc);
       const valueName = getValueName(ctx, fullName, valueDesc);
-      chunks.push(code`case ${fullName}.${memberName}: return "${valueName}";`);
+      chunks.push(code`case ${enumReference}.${memberName}: return "${valueName}";`);
     }
   }
 
   if (options.unrecognizedEnum) {
     if (!unrecognizedEnum.present) {
       chunks.push(code`
-        case ${fullName}.${options.unrecognizedEnumName}:`);
+        case ${enumReference}.${options.unrecognizedEnumName}:`);
 
       if (ctx.options.useNumericEnumForJson) {
         chunks.push(code`
@@ -218,22 +307,25 @@ export function generateEnumToNumber(
   fullName: string,
   enumDesc: EnumDescriptorProto,
   unrecognizedEnum: UnrecognizedEnum,
+  namespaceName?: string,
+  actualEnumName?: string,
 ): Code {
   const { options, utils } = ctx;
 
   const chunks: Code[] = [];
 
+  const enumReference = namespaceName && actualEnumName ? `${namespaceName}.${actualEnumName}` : fullName;
   const functionName = uncapitalize(fullName) + "ToNumber";
-  chunks.push(code`export function ${def(functionName)}(object: ${fullName}): number {`);
+  chunks.push(code`export function ${def(functionName)}(object: ${enumReference}): number {`);
   chunks.push(code`switch (object) {`);
   for (const valueDesc of enumDesc.value) {
-    chunks.push(code`case ${fullName}.${getMemberName(ctx, enumDesc, valueDesc)}: return ${valueDesc.number};`);
+    chunks.push(code`case ${enumReference}.${getMemberName(ctx, enumDesc, valueDesc)}: return ${valueDesc.number};`);
   }
 
   if (options.unrecognizedEnum) {
     if (!unrecognizedEnum.present) {
       chunks.push(code`
-        case ${fullName}.${options.unrecognizedEnumName}:
+        case ${enumReference}.${options.unrecognizedEnumName}:
         default:
           return ${options.unrecognizedEnumValue};
       `);

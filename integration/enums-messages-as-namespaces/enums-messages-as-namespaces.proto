@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+import "google/protobuf/wrappers.proto";
+import "google/api/field_behavior.proto";
+
+message Cool {
+  message Widget {
+    enum WidgetType {
+      UNKNOWN = 0;
+      BUTTON = 1;
+      TEXTBOX = 2;
+      DROPDOWN = 3;
+    }
+
+    enum WidgetState {
+      HIDDEN = 0;
+      ENABLED = 1;
+      DISABLED = 2;
+      LOADING = 3;
+    }
+
+    optional WidgetType type = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+    WidgetState state = 2;
+    string label = 3;
+  }
+
+  message Container {
+    enum Layout {
+      HORIZONTAL = 0;
+      VERTICAL = 1;
+      GRID = 2;
+    }
+
+    Layout layout = 1;
+    repeated Widget widgets = 2;
+  }
+
+  enum GlobalTheme {
+    LIGHT = 0;
+    DARK = 1;
+    AUTO = 2;
+  }
+
+  optional Widget widget = 101;
+}

@@ -308,7 +308,9 @@ export function generateFile(ctx: Context, fileDesc: FileDescriptorProto): [stri
         }
 
         if (staticMembers.length > 0) {
-          const messageFnsTypeParameters = [fullName, hasTypeMember && `'${fullTypeName}'`]
+          const hasNestedEnums = options.nestedEnumsAsNamespaces && message.enumType.length > 0;
+          const typeParam = hasNestedEnums ? `${fullName}.${fullName}` : fullName;
+          const messageFnsTypeParameters = [typeParam, hasTypeMember && `'${fullTypeName}'`]
             .filter((p) => !!p)
             .join(", ");
 
@@ -338,11 +340,22 @@ export function generateFile(ctx: Context, fileDesc: FileDescriptorProto): [stri
             }
           }
 
-          chunks.push(code`
-            export const ${def(fullName)}: ${joinCode(interfaces, { on: " & " })} = {
-              ${joinCode(staticMembers, { on: ",\n\n" })}
-            };
-          `);
+          if (hasNestedEnums) {
+            // Generate MessageFns inside the namespace to work with namespaced interface
+            chunks.push(code`
+              export namespace ${def(fullName)} {
+                export const ${def(fullName)}: ${joinCode(interfaces, { on: " & " })} = {
+                  ${joinCode(staticMembers, { on: ",\n\n" })}
+                };
+              }
+            `);
+          } else {
+            chunks.push(code`
+              export const ${def(fullName)}: ${joinCode(interfaces, { on: " & " })} = {
+                ${joinCode(staticMembers, { on: ",\n\n" })}
+              };
+            `);
+          }
         }
 
         if (options.outputTypeRegistry) {
@@ -1153,9 +1166,19 @@ function generateInterfaceDeclaration(
   const { options, currentFile } = ctx;
   const chunks: Code[] = [];
 
+  // Check if this message has nested enums and we should use namespaces
+  const hasNestedEnums = options.nestedEnumsAsNamespaces && messageDesc.enumType.length > 0;
+
   maybeAddComment(options, sourceInfo, chunks, messageDesc.options?.deprecated);
-  // interface name should be defined to avoid import collisions
-  chunks.push(code`export interface ${def(fullName)} {`);
+
+  if (hasNestedEnums) {
+    // Put interface inside namespace to avoid conflicts
+    chunks.push(code`export declare namespace ${def(fullName)} {`);
+    chunks.push(code`export interface ${def(fullName)} {`);
+  } else {
+    // interface name should be defined to avoid import collisions
+    chunks.push(code`export interface ${def(fullName)} {`);
+  }
 
   if (addTypeToMessages(options)) {
     chunks.push(code`$type${options.outputTypeAnnotations === "optional" ? "?" : ""}: '${fullTypeName}',`);
@@ -1187,6 +1210,12 @@ function generateInterfaceDeclaration(
   }
 
   chunks.push(code`}`);
+
+  if (hasNestedEnums) {
+    // Close the namespace
+    chunks.push(code`}`);
+  }
+
   return joinCode(chunks, { on: "\n" });
 }
 
@@ -1284,8 +1313,12 @@ function generateBaseInstanceFactory(
     fields.push(code`_unknownFields: {}`);
   }
 
+  // Use namespaced type reference if this message has nested enums
+  const hasNestedEnums = options.nestedEnumsAsNamespaces && messageDesc.enumType.length > 0;
+  const returnType = hasNestedEnums ? `${fullName}.${fullName}` : fullName;
+
   return code`
-    function createBase${fullName}(): ${fullName} {
+    function createBase${fullName}(): ${returnType} {
       return { ${joinCode(fields, { on: "," })} };
     }
   `;

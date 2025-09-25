@@ -7,8 +7,15 @@ else
 fi
 
 if [[ $# -eq 0 ]]; then
-  TESTS=$(find . -mindepth 1 -maxdepth 1 -type d)
+  if [[ -n "${INTEGRATION_TEST}" ]]; then
+    echo "INTEGRATION_TEST is set ${INTEGRATION_TEST}"
+    TESTS=$(find . -mindepth 1 -maxdepth 1 -type d -name $INTEGRATION_TEST)
+  else
+    echo "INTEGRATION_TEST is not set ${INTEGRATION_TEST}"
+    TESTS=$(find . -mindepth 1 -maxdepth 1 -type d)
+  fi
 else
+  echo '$# not eq 0'
   TESTS=$@
 fi
 
@@ -22,8 +29,11 @@ for TEST in $TESTS; do
   else
     PARAMETERS=""
   fi
-
-  PROTO_FILES=$(find . -name '*.proto' -type f)
+  if [[ -n "${INTEGRATION_TEST}" ]]; then
+    PROTO_FILES=$(find . -name "$INTEGRATION_TEST.proto" -type f)
+  else
+    PROTO_FILES=$(find . -name '*.proto' -type f)
+  fi
   NODE_OPTIONS="--import tsx" protoc --experimental_allow_proto3_optional \
     "--plugin=$PLUGIN_PATH" \
     --ts_proto_opt="annotateFilesWithVersion=false,${PARAMETERS}" \

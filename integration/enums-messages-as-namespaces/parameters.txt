@@ -1,0 +1,1 @@
+enumsAsLiterals=true,esModuleInterop=true,forceLong=bigint,importSuffix=.js,outputIndex=true,initializeFieldsAsUndefined=false,outputServices=generic-definitions,outputServices=nice-grpc,snakeToCamel=true,useAbortSignal=true,useExactTypes=false,useOptionals=messages,nestedEnumsAsNamespaces=true
